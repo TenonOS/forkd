@@ -9,6 +9,7 @@ include_directories(./ ./include)
 # add_subdirectory(hello)
 # add_subdirectory(world)
 # Target
-add_executable(server ./forkd.c)
+add_executable(server ./forkd.c ./bitmap.c ./list.c)
 add_executable(client ./client.c)
+add_executable(test_bitmap ./bitmap.c ./test_bitmap.c)
 # target_link_libraries(helloworld hello world)

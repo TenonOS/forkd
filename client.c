@@ -6,8 +6,7 @@
 #include <arpa/inet.h>
 
 
-int main() {
-    char *request = "fork request";
+int main(int argc, char *argv[]) {
     uint16_t serv_port = 9190;
     const char* serv_ip = "127.0.0.1";
     int serv_sock = socket(AF_INET, SOCK_STREAM, 0);
@@ -25,8 +24,14 @@ int main() {
     }
 
     /* Send request to forkd */
-    // request = parse_args_to_str();
-    write(serv_sock, request, strlen(request));
+    char request[512];
+    int len = 0;
+    if (argc == 2) {
+        len = sprintf(request, "sudo qemu-system-x86_64 -kernel \"./build/app-test-fork_qemu-x86_64\" -cpu host -enable-kvm -nographic -m 1G -forkable path=\"/images/\" -forkgroup %d", atoi(argv[1]));
+    } else {
+        len = sprintf(request, "sudo qemu-system-x86_64 -kernel \"./build/app-test-fork_qemu-x86_64\" -cpu host -enable-kvm -nographic -m 1G -forkable path=\"/images/\" -forkgroup");
+    }
+    write(serv_sock, request, len);
 
     int buffer_size = 1024;
     char receive[buffer_size];
