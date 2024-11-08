@@ -25,14 +25,13 @@ int main(int argc, char *argv[]) {
 
     /* Send request to forkd */
     char request[512];
-    int len = 0;
-    if (argc == 2) {
-        len = sprintf(request, "sudo qemu-system-x86_64 -kernel \"./build/app-test-fork_qemu-x86_64\" -cpu host -enable-kvm -nographic -m 1G -forkable path=\"/images/\" -forkgroup %d", atoi(argv[1]));
-    } else {
-        len = sprintf(request, "sudo qemu-system-x86_64 -kernel \"./build/app-test-fork_qemu-x86_64\" -cpu host -enable-kvm -nographic -m 1G -forkable path=\"/images/\" -forkgroup");
-    }
-    write(serv_sock, request, len);
+    int len = sprintf(request, "sudo qemu-system-x86_64 -kernel \"./build/app-test-fork_qemu-x86_64\" -cpu host -enable-kvm -nographic -m 1G -forkable path=\"/images/\" -forkgroup %d", atoi(argv[1]));
 
+    int windex = 0;
+    while (windex < len) {
+        windex += write(serv_sock, request + windex, len - windex);
+    }
+    
     int buffer_size = 1024;
     char receive[buffer_size];
     int rindex = 0;
@@ -52,8 +51,17 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    write(fileno(stdout), receive, rindex);
-    putchar('\n');
+    if (receive[0] >= '0' && receive[0] <= '9') {
+        char* p = strtok(receive, " ");
+        int gid = atoi(p);
+        int pid = atoi(strtok(NULL, " "));
+        printf("gid : %d, pid : %d.\n", gid, pid);
+    } else {
+        // print error 
+    }
+
+    // write(fileno(stdout), receive, rindex);
+    // putchar('\n');
 
     // getchar();
-}
+};
