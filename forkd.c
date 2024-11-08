@@ -11,8 +11,6 @@
 #include <fcntl.h>
 #include <errno.h>
 
-// #define CHECK
-
 static gpid_bitmap gpbmap;
 
 static int epfd = 0;
@@ -109,6 +107,8 @@ void accept_callback(int serv_sock) {
     set_event(clnt_sock, EPOLLIN|EPOLLET, 1);
 }
 
+#define CHECK
+
 void recv_callback(int clnt_sock) {
     while (1) {
         if (connect_list[clnt_sock].rindex >= BUF_SIZE) {
@@ -130,39 +130,40 @@ void recv_callback(int clnt_sock) {
     }
     connect_list[clnt_sock].rbuffer[connect_list[clnt_sock].rindex] = '\0';
 
-    // TODO 
-    // 1. str_to_parse_args()
-    // 2. organize gid + pid
-
-    fargs_list_node* head = split_args(connect_list[clnt_sock].rbuffer);
+    char* command;
+    char** args;
+    args = split_args(connect_list[clnt_sock].rbuffer, &command);
     memset(connect_list[clnt_sock].rbuffer, 0, BUF_SIZE);
     connect_list[clnt_sock].rindex = 0;
 
-    // check
 #ifdef CHECK
-    fargs_list_node* pos;
-    list_for_each(pos, head) {
-        fargs* farg = list_entry(pos, fargs, list_node);
-        printf("option: %s\n", farg->option);
-        if (farg->parameter != NULL) {
-            printf("parameter: %s\n", farg->parameter);
-        }
+    printf("command: %s\n", command);
+    int i = 0;
+    while (args[i] != NULL) {
+        printf("args[%d]: %s\n", i, args[i]);
+        ++i;
     }
-    printf("---------------------------\n");
 #endif
 
-    // 规定 forkgroup 恒为最后一个参数
-    fargs_list_node* tmp = head->prev;
-    fargs* forkgroup = list_entry(tmp, fargs, list_node);
-    if (strcmp(forkgroup->option, "-forkgroup")) {
-        char* error_message = "error: -forkgroup must be the last parameter.";
+    int receive_gid = -1;
+    int index = 0;
+    while (args[index] != NULL) {
+        if (strcmp(args[index], "-forkgroup") == 0) {
+            receive_gid = atoi(args[index+1]);
+            break;
+        }
+        index ++;
+    }
+
+    if (receive_gid == -1) {
+        char* error_message = "error: -forkgroup is not found or gid is invalid.";
         error_handling(error_message, clnt_sock);
         return ;
     }
 
     int gid = -1;
     
-    if (atoi(forkgroup->parameter) == 0) {
+    if (receive_gid == 0) {
         gid = find_free_gid(&gpbmap);
         if (gid == -1) {
             char* error_message = "error: no gid available.";
@@ -170,7 +171,7 @@ void recv_callback(int clnt_sock) {
             return ;
         }
     } else {
-        gid = atoi(forkgroup->parameter);
+        gid = receive_gid;
         if (!is_gid_set(&gpbmap, gid)) {
             char error_message[128];
             sprintf(error_message, "error: gid %d is not available.", gid);
@@ -210,7 +211,7 @@ void recv_callback(int clnt_sock) {
         set_event(clnt_sock, EPOLLOUT|EPOLLET, 0);
     } else {
         // child progress
-        printf("child progress\n");
+        // printf("child progress\n");
         exit(0);
     }
 }
@@ -248,29 +249,34 @@ void set_event(int fd, int event, int flag) {
 	}
 }
 
-fargs_list_node* split_args(char* args) {
-    fargs_list_node* head = (fargs_list_node*)malloc(sizeof(fargs_list_node));
-    list_init(head);
-    fargs_list_node* ptr = head;
+#define ARG_NUMBER 128
 
+char** split_args(char* args, char** command) {
     char* p = strtok(args, " ");
+    if (p == NULL) {
+        printf("split_args() error.\n");
+        return NULL;
+    }
+    char* comm = (char*)malloc(sizeof(char)*(strlen(p)+1));
+    strcpy(comm, p);
+    *command = comm;
+
+    p = strtok(NULL, " ");
+    int index = 0;  
+    char** result = (char**)malloc(sizeof(char*)*128);
 
     while (p!= NULL) {
-        fargs* new_farg = (fargs*)malloc(sizeof(fargs));
-        new_farg->option = (char*)malloc(sizeof(char)*strlen(p));
-        strcpy(new_farg->option, p);
-        new_farg->parameter = NULL;
-        p = strtok(NULL, " ");
-        if (new_farg->option[0] == '-' && p != NULL && p[0] != '-') {
-            new_farg->parameter = (char*)malloc(sizeof(char)*strlen(p));
-            strcpy(new_farg->parameter, p);
-            // new_farg->parameter = p;
-            p = strtok(NULL, " ");
+        if (index >= ARG_NUMBER) {
+            printf("split_args() error: too many args.\n");
+            return NULL;
         }
-            
-        list_add(&new_farg->list_node, ptr);
-        ptr = ptr->next;
+        result[index] = (char *)malloc((strlen(p) + 1) * sizeof(char));
+        strcpy(result[index], p);
+        index++;
+        p = strtok(NULL, " ");
     }
 
-    return head;
+    result[index] = NULL;
+
+    return result;
 }

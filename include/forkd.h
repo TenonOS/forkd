@@ -38,6 +38,6 @@ typedef struct {
 
 typedef list_h_t fargs_list_node;
 
-fargs_list_node* split_args(char* args);
+char** split_args(char* args, char** command);
 
 #endif

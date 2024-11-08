@@ -1,1 +1,1 @@
-sudo qemu-system-x86_64 -kernel "./build/app-test-fork_qemu-x86_64" -cpu host -enable-kvm -nographic -m 1G -forkable path="/images/" -forkgroup
+qemu-system-x86_64 -kernel "./build/app-test-fork_qemu-x86_64" -cpu host -enable-kvm -nographic -m 1G -forkable path="/images/" -forkgroup 0
