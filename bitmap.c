@@ -58,10 +58,12 @@ static inline int resize_bitmap(gpid_bitmap* gpbmap, int new_capacity) {
 }
 
 void init_gpid_bitmap(gpid_bitmap* gpbmap) {
-    gpbmap->capacity = 1;
+    gpbmap->capacity = 2;
     gpbmap->max_gid = 0;
     gpbmap->bitmap = (uint_bm*)malloc(sizeof(uint_bm)*(BYTE_NUMBER(gpbmap->capacity) + GID_OFFSET));
     memset(gpbmap->bitmap, 0, sizeof(uint_bm)*(BYTE_NUMBER(gpbmap->capacity) + GID_OFFSET));
+    // gid 0 is illegal
+    set_bit(0, &gpbmap->bitmap[0]);
 }
 
 int find_free_gid(gpid_bitmap* gpbmap) {

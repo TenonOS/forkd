@@ -162,7 +162,7 @@ void recv_callback(int clnt_sock) {
 
     int gid = -1;
     
-    if (forkgroup->parameter == NULL) {
+    if (atoi(forkgroup->parameter) == 0) {
         gid = find_free_gid(&gpbmap);
         if (gid == -1) {
             char* error_message = "error: no gid available.";
@@ -177,7 +177,6 @@ void recv_callback(int clnt_sock) {
             error_handling(error_message, clnt_sock);
             return ;
         }
-        // TODO 检查 gid 是否合法
     }
 
     int pid = find_free_pid(&gpbmap, gid);
@@ -199,11 +198,14 @@ void recv_callback(int clnt_sock) {
         // connect_list[clnt_sock].rindex = 0;
 
         // 规定：返回信息中第一个参数为 gid，第二个参数为 pid
-        if (forkgroup->parameter == NULL) {
-            connect_list[clnt_sock].windex = sprintf(connect_list[clnt_sock].wbuffer, "%d %d", gid, pid);
-        } else {
-            connect_list[clnt_sock].windex = sprintf(connect_list[clnt_sock].wbuffer, "%d", pid);
-        }
+
+        connect_list[clnt_sock].windex = sprintf(connect_list[clnt_sock].wbuffer, "%d %d", gid, pid);
+
+        // if (forkgroup->parameter == NULL) {
+        //     connect_list[clnt_sock].windex = sprintf(connect_list[clnt_sock].wbuffer, "%d %d", gid, pid);
+        // } else {
+        //     connect_list[clnt_sock].windex = sprintf(connect_list[clnt_sock].wbuffer, "%d", pid);
+        // }
         
         set_event(clnt_sock, EPOLLOUT|EPOLLET, 0);
     } else {
