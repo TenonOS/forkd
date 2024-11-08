@@ -145,21 +145,27 @@ void recv_callback(int clnt_sock) {
     }
 #endif
 
-    int receive_gid = -1;
+    char* receive_gid_str = NULL;
     int index = 0;
     while (args[index] != NULL) {
         if (strcmp(args[index], "-forkgroup") == 0) {
-            receive_gid = atoi(args[index+1]);
+            receive_gid_str = (char*)malloc(sizeof(char)*(strlen(args[index+1])+1));
+            strcpy(receive_gid_str, args[index+1]);
             break;
         }
         index ++;
     }
 
-    if (receive_gid == -1) {
-        char* error_message = "error: -forkgroup is not found or gid is invalid.";
+    if (receive_gid_str == NULL) {
+        char* error_message = "error: -forkgroup is not found or parameter is invalid.";
         error_handling(error_message, clnt_sock);
         return ;
     }
+
+    strtok(receive_gid_str, "=");
+    int receive_gid = atoi(strtok(NULL, "="));
+    
+    printf("receive_gid: %d\n", receive_gid);
 
     int gid = -1;
     

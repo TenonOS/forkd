@@ -25,7 +25,7 @@ int main(int argc, char *argv[]) {
 
     /* Send request to forkd */
     char request[512];
-    int len = sprintf(request, "qemu-system-x86_64 -kernel \"./build/app-test-fork_qemu-x86_64\" -cpu host -enable-kvm -nographic -m 1G -forkable path=\"/images/\" -forkgroup %d", atoi(argv[1]));
+    int len = sprintf(request, "qemu-system-x86_64 -kernel \"./build/app-test-fork_qemu-x86_64\" -cpu host -enable-kvm -nographic -m 1G -forkable path=\"/images/\" -forkgroup %s", argv[1]);
 
     int windex = 0;
     while (windex < len) {
