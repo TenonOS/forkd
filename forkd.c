@@ -164,8 +164,6 @@ void recv_callback(int clnt_sock) {
 
     strtok(receive_gid_str, "=");
     int receive_gid = atoi(strtok(NULL, "="));
-    
-    printf("receive_gid: %d\n", receive_gid);
 
     int gid = -1;
     
@@ -218,6 +216,7 @@ void recv_callback(int clnt_sock) {
     } else {
         // child progress
         // printf("child progress\n");
+        execvp(command, args);
         exit(0);
     }
 }
