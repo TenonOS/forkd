@@ -18,6 +18,7 @@ typedef struct {
 void init_gpid_bitmap(gpid_bitmap* gpbmap);
 int find_free_gid(gpid_bitmap* gpbmap);
 int find_free_pid(gpid_bitmap* gpbmap, int gid);
+// void set_pid(gpid_bitmap* gpbmap, int gid, int pid);
 void release_gid(gpid_bitmap* gpbmap, int gid);
 void release_pid(gpid_bitmap* gpbmap, int gid, int pid);
 void print_bitmap(gpid_bitmap* gpbmap);

@@ -7,6 +7,10 @@
 
 
 int main(int argc, char *argv[]) {
+    if (argc!= 3) {
+        printf("Usage:./client <gid> <pid>\n");
+        exit(1);
+    }
     uint16_t serv_port = 9190;
     const char* serv_ip = "127.0.0.1";
     int serv_sock = socket(AF_INET, SOCK_STREAM, 0);
@@ -25,7 +29,7 @@ int main(int argc, char *argv[]) {
 
     /* Send request to forkd */
     char request[512];
-    int len = sprintf(request, "qemu-system-x86_64 -kernel \"./build/app-test-fork_qemu-x86_64\" -cpu host -enable-kvm -nographic -m 1G -forkable path=\"/images/\" -forkgroup %s", argv[1]);
+    int len = sprintf(request, "qemu-system-x86_64 -kernel \"./build/app-test-fork_qemu-x86_64\" -cpu host -enable-kvm -nographic -m 1G -forkable path=\"/images/\" -forkgroup gid=%d,pid=%d", atoi(argv[1]), atoi(argv[2]));
 
     int windex = 0;
     while (windex < len) {

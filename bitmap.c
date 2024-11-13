@@ -75,6 +75,7 @@ int find_free_gid(gpid_bitmap* gpbmap) {
         } else {
             free_gid = temp_gid + i * bit_number;
             set_bit(temp_gid, &gpbmap->bitmap[i]);
+            memset(&gpbmap->bitmap[free_gid * PID_BYTE_NUMBER + GID_OFFSET], 0, sizeof(uint_bm) * PID_BYTE_NUMBER);
             break;
         }
     }
@@ -160,13 +161,13 @@ void release_pid(gpid_bitmap* gpbmap, int gid, int pid) {
     int offset = pid % bit_number;
     clear_bit(offset, &gpbmap->bitmap[index + pid / bit_number]);
 
-    for (int i = 0; i < PID_BYTE_NUMBER; ++i) {
-        if (gpbmap->bitmap[index + i] != 0) {
-            return ;
-        }
-    }
+    // for (int i = 0; i < PID_BYTE_NUMBER; ++i) {
+    //     if (gpbmap->bitmap[index + i] != 0) {
+    //         return ;
+    //     }
+    // }
 
-    release_gid(gpbmap, gid);
+    // release_gid(gpbmap, gid);
 }
 
 void printBinary(uint_bm num) {
