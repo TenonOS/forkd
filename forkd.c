@@ -12,6 +12,7 @@
 #include <errno.h>
 
 #define ERROR_MESSAGE_SIZE 128
+#define PARAMETER_SIZE 128
 
 static gpid_bitmap gpbmap;
 
@@ -116,13 +117,13 @@ static inline int check_number(char* str) {
     return (str[0] >= '0' && str[0] <= '9') ? 1 : 0;
 }
 
-static inline char* get_forkgroup_parameters(char** args, int* receive_gid, int* receive_pid) {
+static inline char* get_forkgroup_parameters(char** args, int* receive_gid, int* receive_pid, int* fork_group_parameter_index) {
     char* forkgroup_parameter = NULL;
     int index = 0;
     while (args[index] != NULL) {
-        if (strcmp(args[index], "-forkgroup") == 0) {
+        if (strcmp(args[index], "-forkgroup") == 0 && args[index+1] != NULL) {
             forkgroup_parameter = (char*)malloc(sizeof(char)*(strlen(args[index+1])+1));
-            strcpy(forkgroup_parameter, args[index+1]);
+            strcpy(forkgroup_parameter, args[++index]);
             break;
         }
         index ++;
@@ -150,6 +151,7 @@ static inline char* get_forkgroup_parameters(char** args, int* receive_gid, int*
         return error_message;
     }
 
+    *fork_group_parameter_index = index;
     return NULL;
 }
 
@@ -196,7 +198,7 @@ void recv_callback(int clnt_sock) {
     memset(connect_list[clnt_sock].rbuffer, 0, BUF_SIZE);
     connect_list[clnt_sock].rindex = 0;
 
-#define CHECK_ARGS
+// #define CHECK_ARGS
 #ifdef CHECK_ARGS
     printf("command: %s\n", command);
     int i = 0;
@@ -208,9 +210,10 @@ void recv_callback(int clnt_sock) {
 
     int receive_gid = -1;
     int receive_pid = -1;
+    int fork_group_parameter_index = -1;
 
-    char* error_message = get_forkgroup_parameters(args, &receive_gid, &receive_pid);
-    if (error_message!= NULL) {
+    char* error_message = get_forkgroup_parameters(args, &receive_gid, &receive_pid, &fork_group_parameter_index);
+    if (error_message != NULL) {
         error_handling(error_message, clnt_sock);
         return ;
     }
@@ -285,6 +288,25 @@ void recv_callback(int clnt_sock) {
     } else {
         // child progress
         // printf("child progress\n");
+
+        char* temp = (char*)malloc(sizeof(char)*BUF_SIZE);
+        sprintf(temp, "gid=%d,pid=%d", gid, pid);
+        free(args[fork_group_parameter_index]);
+        args[fork_group_parameter_index] = (char*)malloc(sizeof(char)*(strlen(temp)+1));
+        strcpy(args[fork_group_parameter_index], temp);
+        free(temp);
+
+#define CHECK_ARGS_CHILD
+#ifdef CHECK_ARGS_CHILD
+        printf("child progress check args\n");
+        printf("command: %s\n", command);
+        int i = 0;
+        while (args[i] != NULL) {
+            printf("args[%d]: %s\n", i, args[i]);
+            ++i;
+        }
+        printf("child progress check args end\n");
+#endif
         execvp(command, args);
         exit(0);
     }
