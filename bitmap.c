@@ -75,7 +75,9 @@ int find_free_gid(gpid_bitmap* gpbmap) {
         } else {
             free_gid = temp_gid + i * bit_number;
             set_bit(temp_gid, &gpbmap->bitmap[i]);
-            memset(&gpbmap->bitmap[free_gid * PID_BYTE_NUMBER + GID_OFFSET], 0, sizeof(uint_bm) * PID_BYTE_NUMBER);
+            if (free_gid < gpbmap->capacity) {
+                memset(&gpbmap->bitmap[free_gid * PID_BYTE_NUMBER + GID_OFFSET], 0, sizeof(uint_bm) * PID_BYTE_NUMBER);
+            }
             break;
         }
     }

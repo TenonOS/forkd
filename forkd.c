@@ -92,7 +92,7 @@ void accept_callback(int serv_sock) {
     if (clnt_sock == -1) {
         printf("accept() error.\n");
     } else {
-        printf("accept client: %d\n", clnt_sock);
+        // printf("accept client: %d\n", clnt_sock);
     }
 
     connect_list[clnt_sock].fd = clnt_sock;
@@ -180,7 +180,7 @@ void recv_callback(int clnt_sock) {
         if (str_len == 0) {
             epoll_ctl(epfd, EPOLL_CTL_DEL, clnt_sock, NULL);
             close(clnt_sock);
-            printf("close client: %d\n", clnt_sock);
+            // printf("close client: %d\n", clnt_sock);
             return ;
         } else if (str_len < 0) {
             if (errno == EAGAIN) {
@@ -264,6 +264,8 @@ void recv_callback(int clnt_sock) {
         return ;
     }
 
+    printf("new_gid: %d, new_pid: %d\n", gid, pid);
+
     pid_t tmp_pid;
     tmp_pid = vfork();
     if (tmp_pid != 0) {
@@ -296,7 +298,7 @@ void recv_callback(int clnt_sock) {
         strcpy(args[fork_group_parameter_index], temp);
         free(temp);
 
-#define CHECK_ARGS_CHILD
+// #define CHECK_ARGS_CHILD
 #ifdef CHECK_ARGS_CHILD
         printf("child progress check args\n");
         printf("command: %s\n", command);
@@ -307,7 +309,7 @@ void recv_callback(int clnt_sock) {
         }
         printf("child progress check args end\n");
 #endif
-        execvp(command, args);
+        // execvp(command, args);
         exit(0);
     }
 }
