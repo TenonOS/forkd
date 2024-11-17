@@ -309,7 +309,7 @@ void recv_callback(int clnt_sock) {
         }
         printf("child progress check args end\n");
 #endif
-        // execvp(command, args);
+        execvp(command, args);
         exit(0);
     }
 }
