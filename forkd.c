@@ -14,6 +14,8 @@
 #define ERROR_MESSAGE_SIZE 128
 #define PARAMETER_SIZE 128
 
+// TODO 暂不处理释放逻辑
+
 static gpid_bitmap gpbmap;
 
 static int epfd = 0;
