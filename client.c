@@ -44,7 +44,8 @@ int main(int argc, char *argv[]) {
     while (1) {
         int str_len = read(serv_sock, receive+rindex, buffer_size - rindex);
         if (str_len == 0) {
-            close(serv_sock);
+            printf("Receive finished\n");
+            // close(serv_sock);
             break;
         } else {
             rindex += str_len;
@@ -63,6 +64,9 @@ int main(int argc, char *argv[]) {
     } else {
         // print error 
     }
+
+    // after qum_fork
+    close(serv_sock);
 
     // write(fileno(stdout), receive, rindex);
     // putchar('\n');

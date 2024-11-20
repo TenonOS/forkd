@@ -14,6 +14,9 @@ void send_callback(int clnt_sock);
 
 typedef struct {
     int fd;
+    int flag; // if args received
+    char* command;  // TODO statu maintain
+    char** args;
     char rbuffer[BUF_SIZE];
     int rindex;
     char wbuffer[BUF_SIZE];
@@ -24,7 +27,7 @@ typedef struct {
 
 void init_server(unsigned short port);
 
-void error_handling(char *message, int clnt_sock);
+void error_handling(int error_number, int clnt_sock, void* data);
 
 void set_noblocking_mode(int fd);
 

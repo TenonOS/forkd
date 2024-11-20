@@ -11,7 +11,7 @@
 #include <fcntl.h>
 #include <errno.h>
 
-#define ERROR_MESSAGE_SIZE 128
+#define ERROR_MESSAGE_SIZE 512
 #define PARAMETER_SIZE 128
 
 // TODO 暂不处理释放逻辑
@@ -98,6 +98,9 @@ void accept_callback(int serv_sock) {
     }
 
     connect_list[clnt_sock].fd = clnt_sock;
+    connect_list[clnt_sock].flag = 0;
+    connect_list[clnt_sock].command = NULL;
+    connect_list[clnt_sock].args = NULL;
     connect_list[clnt_sock].s_recv_callback = recv_callback;
     connect_list[clnt_sock].s_send_callback = send_callback;
     memset(connect_list[clnt_sock].rbuffer, 0, BUF_SIZE);
@@ -112,206 +115,39 @@ void accept_callback(int serv_sock) {
     set_event(clnt_sock, EPOLLIN|EPOLLET, 1);
 }
 
-static inline int check_number(char* str) {
-    if (str == NULL) {
-        return 0;
-    }
-    return (str[0] >= '0' && str[0] <= '9') ? 1 : 0;
-}
-
-static inline char* get_forkgroup_parameters(char** args, int* receive_gid, int* receive_pid, int* fork_group_parameter_index) {
-    char* forkgroup_parameter = NULL;
-    int index = 0;
-    while (args[index] != NULL) {
-        if (strcmp(args[index], "-forkgroup") == 0 && args[index+1] != NULL) {
-            forkgroup_parameter = (char*)malloc(sizeof(char)*(strlen(args[index+1])+1));
-            strcpy(forkgroup_parameter, args[++index]);
-            break;
-        }
-        index ++;
-    }
-
-    if (forkgroup_parameter == NULL) {
-        char* error_message = "error: -forkgroup is not found or parameter is invalid.";
-        return error_message;
-    }
-
-    char* p = strtok(forkgroup_parameter, "=,");
-    p = strtok(NULL, "=,");
-    if (check_number(p)) {
-        *receive_gid = atoi(p);
-    } else {
-        char* error_message = "error: -forkgroup parameter is invalid.";
-        return error_message;
-    }
-    p = strtok(NULL, "=,");
-    p = strtok(NULL, "=,");
-    if (check_number(p)) {
-        *receive_pid = atoi(p);
-    } else {
-        char* error_message = "error: -forkgroup parameter is invalid.";
-        return error_message;
-    }
-
-    *fork_group_parameter_index = index;
-    return NULL;
-}
-
-static inline char* mask_pid(int gid) {
-    // pid 0 is illegal
-    int pid0 = find_free_pid(&gpbmap, gid);
-    // pid 1 need set
-    int pid1 = find_free_pid(&gpbmap, gid);
-
-    if (pid0 != 0 || pid1 != 1) {
-        release_gid(&gpbmap, gid);
-        char* error_message = (char*)malloc(sizeof(char)*BUF_SIZE);
-        sprintf(error_message, "fatal error: pid_bitmap of gid %d is dirty.", gid);
-        return error_message;
-    }
-
-    return NULL;
-}
+static void check_args(char* command, char** args);
+static void free_args(char* command, char** args);
+static int mask_pid(int gid);
+static int get_forkgroup_parameters(char** args, int* receive_gid, int* receive_pid, int* fork_group_parameter_index);
+static inline int check_number(char* str);
+static void get_fork_args(int clnt_sock);
 
 void recv_callback(int clnt_sock) {
-    while (1) {
-        if (connect_list[clnt_sock].rindex >= BUF_SIZE) {
-            printf("recv_callback() error, out of buffer.\n");
-        }
-        int str_len = read(clnt_sock, connect_list[clnt_sock].rbuffer+connect_list[clnt_sock].rindex, BUF_SIZE-connect_list[clnt_sock].rindex);
-        if (str_len == 0) {
-            epoll_ctl(epfd, EPOLL_CTL_DEL, clnt_sock, NULL);
-            close(clnt_sock);
-            // printf("close client: %d\n", clnt_sock);
-            return ;
-        } else if (str_len < 0) {
-            if (errno == EAGAIN) {
-                break;
-            }
-        } else {
-            connect_list[clnt_sock].rindex += str_len;
-        }
-    }
-    connect_list[clnt_sock].rbuffer[connect_list[clnt_sock].rindex] = '\0';
-
-    char* command;
-    char** args;
-    args = split_args(connect_list[clnt_sock].rbuffer, &command);
-    memset(connect_list[clnt_sock].rbuffer, 0, BUF_SIZE);
-    connect_list[clnt_sock].rindex = 0;
-
-// #define CHECK_ARGS
-#ifdef CHECK_ARGS
-    printf("command: %s\n", command);
-    int i = 0;
-    while (args[i] != NULL) {
-        printf("args[%d]: %s\n", i, args[i]);
-        ++i;
-    }
-#endif
-
-    int receive_gid = -1;
-    int receive_pid = -1;
-    int fork_group_parameter_index = -1;
-
-    char* error_message = get_forkgroup_parameters(args, &receive_gid, &receive_pid, &fork_group_parameter_index);
-    if (error_message != NULL) {
-        error_handling(error_message, clnt_sock);
+    if (!connect_list[clnt_sock].flag) {
+        printf("get fork args.\n");
+        get_fork_args(clnt_sock);
         return ;
     }
 
-    printf("receive_gid: %d, receive_pid: %d\n", receive_gid, receive_pid);
+    close(clnt_sock); 
 
-    // 1. receive_gid = 0, receive_pid = 1
-    // 2. receive_gid = m, receive_pid = 1
-    // 3. receive_gid = m, receive_pid = n (n > 1)
-    
-    int gid = -1;
-    
-    if (receive_gid == 0) {
-        if (receive_pid != 1) {
-            char* error_message = "error: -forkgroup parameter is invalid, if gid == 0, pid must be 1.";
-            error_handling(error_message, clnt_sock);
-            return ;
-        }
-        gid = find_free_gid(&gpbmap);
-        if (gid == -1) {
-            char* error_message = "error: no gid available.";
-            error_handling(error_message, clnt_sock);
-            return ;
-        }
-
-        char* error_message = mask_pid(gid);
-        if (error_message != NULL) {
-            error_handling(error_message, clnt_sock);
-            return ;
-        }
-
-        // pid = find_free_pid(&gpbmap, gid);
-    } else {
-        gid = receive_gid;
-        if (!is_gid_set(&gpbmap, gid) || !is_pid_set(&gpbmap, gid, receive_pid)) {
-            char error_message[ERROR_MESSAGE_SIZE];
-            sprintf(error_message, "error: gid %d or pid %d is not available.", gid, receive_pid);
-            error_handling(error_message, clnt_sock);
-            return ;
-        }
-    }
-
-    int pid = find_free_pid(&gpbmap, gid);
-    if (pid == -1) {
-        char error_message[ERROR_MESSAGE_SIZE];
-        sprintf(error_message, "error: no pid available of group %d.", gid);
-        error_handling(error_message, clnt_sock);
+    if (connect_list[clnt_sock].command == NULL || connect_list[clnt_sock].args == NULL)
         return ;
-    }
 
-    printf("new_gid: %d, new_pid: %d\n", gid, pid);
+    printf("qeum fork finished, do fork.\n");
 
     pid_t tmp_pid;
     tmp_pid = vfork();
     if (tmp_pid != 0) {
-        // father progress
-        // tmp, read and write client information use one buffer
-        // write(fileno(stdout), connect_list[clnt_sock].rbuffer, connect_list[clnt_sock].rindex);
-        // putchar('\n');
-        // memset(connect_list[clnt_sock].rbuffer, 0, BUF_SIZE);
-        // connect_list[clnt_sock].rindex = 0;
-
-        // 规定：返回信息中第一个参数为 gid，第二个参数为 pid
-
-        connect_list[clnt_sock].windex = sprintf(connect_list[clnt_sock].wbuffer, "%d %d", gid, pid);
-
-        // if (forkgroup->parameter == NULL) {
-        //     connect_list[clnt_sock].windex = sprintf(connect_list[clnt_sock].wbuffer, "%d %d", gid, pid);
-        // } else {
-        //     connect_list[clnt_sock].windex = sprintf(connect_list[clnt_sock].wbuffer, "%d", pid);
-        // }
-        
-        set_event(clnt_sock, EPOLLOUT|EPOLLET, 0);
+        // parent progress
+        // printf("parent progress\n");
+        // TODO free command and args
+        free_args(connect_list[clnt_sock].command, connect_list[clnt_sock].args);
     } else {
         // child progress
         // printf("child progress\n");
-
-        char* temp = (char*)malloc(sizeof(char)*BUF_SIZE);
-        sprintf(temp, "gid=%d,pid=%d", gid, pid);
-        free(args[fork_group_parameter_index]);
-        args[fork_group_parameter_index] = (char*)malloc(sizeof(char)*(strlen(temp)+1));
-        strcpy(args[fork_group_parameter_index], temp);
-        free(temp);
-
-// #define CHECK_ARGS_CHILD
-#ifdef CHECK_ARGS_CHILD
-        printf("child progress check args\n");
-        printf("command: %s\n", command);
-        int i = 0;
-        while (args[i] != NULL) {
-            printf("args[%d]: %s\n", i, args[i]);
-            ++i;
-        }
-        printf("child progress check args end\n");
-#endif
-        execvp(command, args);
+        // check_args(connect_list[clnt_sock].command, connect_list[clnt_sock].args);        
+        execvp(connect_list[clnt_sock].command, connect_list[clnt_sock].args);
         exit(0);
     }
 }
@@ -322,11 +158,50 @@ void send_callback(int clnt_sock) {
     set_event(clnt_sock, EPOLLIN|EPOLLET, 0);
 }
 
-void error_handling(char *message, int clnt_sock) {
-    printf("%s\n", message);
-    memcpy(connect_list[clnt_sock].wbuffer, message, strlen(message));
-    connect_list[clnt_sock].windex = strlen(message);
+void error_handling(int error_number, int clnt_sock, void* data) {
+    char* error_message = NULL;
+    int malloc_flag = 0;
+    switch (error_number)
+    {
+    case 1:
+        error_message = "error: -forkgroup is not found or parameter is invalid.";
+        break;
+    case 2:
+        error_message = "error: -forkgroup parameter is invalid.";
+        break;
+    case 3:
+        error_message = (char*)malloc(sizeof(char)*ERROR_MESSAGE_SIZE);
+        sprintf(error_message, "fatal error: pid_bitmap of gid %d is dirty.", (int)data);
+        malloc_flag = 1;
+        break;
+    case 4:
+        error_message = "error: args is NULL.";
+        break;
+    case 5:
+        error_message = "error: -forkgroup parameter is invalid, if gid == 0, pid must be 1.";
+        break;
+    case 6:
+        error_message = "error: no gid available.";
+        break;
+    case 7:
+        error_message = "error: gid or pid is not available.";
+        break;
+    case 8:
+        error_message = (char*)malloc(sizeof(char)*ERROR_MESSAGE_SIZE);
+        sprintf(error_message, "error: no pid available of group %d.", (int)data);
+        malloc_flag = 1;
+        break;
+    
+    default:
+        break;
+    }
+    printf("%s\n", error_message);
+    memcpy(connect_list[clnt_sock].wbuffer, error_message, strlen(error_message));
+    connect_list[clnt_sock].windex = strlen(error_message);
     set_event(clnt_sock, EPOLLOUT|EPOLLET, 0);
+    if (malloc_flag) {
+        free(error_message);
+    }
     return ;
 }
 
@@ -362,12 +237,14 @@ char** split_args(char* args, char** command) {
     *command = comm;
 
     p = strtok(NULL, " ");
-    int index = 0;  
+    int index = 0;
     char** result = (char**)malloc(sizeof(char*)*ARG_NUMBER);
 
     while (p!= NULL) {
         if (index >= ARG_NUMBER) {
             printf("split_args() error: too many args.\n");
+            result[ARG_NUMBER - 1] = NULL;
+            free_args(comm, result);
             return NULL;
         }
         result[index] = (char *)malloc((strlen(p) + 1) * sizeof(char));
@@ -379,4 +256,203 @@ char** split_args(char* args, char** command) {
     result[index] = NULL;
 
     return result;
+}
+
+static void check_args(char* command, char** args) {
+    printf("check args\n");
+    printf("command: %s\n", command);
+    int i = 0;
+    while (args[i] != NULL) {
+        printf("args[%d]: %s\n", i, args[i]);
+        ++i;
+    }
+    printf("check args end\n");
+}
+
+static void free_args(char* command, char** args) {
+    if (command != NULL) {
+        free(command);
+    }
+    if (args == NULL) {
+        return ;
+    }
+    int i = 0;
+    while (args[i]!= NULL) {
+        free(args[i]);
+        ++i;
+    }
+    free(args);
+}
+
+static inline int check_number(char* str) {
+    if (str == NULL) {
+        return 0;
+    }
+    return (str[0] >= '0' && str[0] <= '9') ? 1 : 0;
+}
+
+static int get_forkgroup_parameters(char** args, int* receive_gid, int* receive_pid, int* fork_group_parameter_index) {
+    int index = 0;
+    char* forkgroup_parameter = NULL;
+    while (args[index] != NULL) {
+        if (strcmp(args[index], "-forkgroup") == 0 && args[index+1] != NULL) {
+            forkgroup_parameter = (char*)malloc(sizeof(char)*(strlen(args[index+1])+1));
+            strcpy(forkgroup_parameter, args[++index]);
+            break;
+        }
+        index ++;
+    }
+
+    if (forkgroup_parameter == NULL) {
+        return 1;
+    }
+
+    char* p = strtok(forkgroup_parameter, "=,");
+    p = strtok(NULL, "=,");
+    if (check_number(p)) {
+        *receive_gid = atoi(p);
+    } else {
+        free(forkgroup_parameter);
+        return 2;
+    }
+    p = strtok(NULL, "=,");
+    p = strtok(NULL, "=,");
+    if (check_number(p)) {
+        *receive_pid = atoi(p);
+    } else {
+        free(forkgroup_parameter);
+        return 2;
+    }
+
+    *fork_group_parameter_index = index;
+    free(forkgroup_parameter);
+    return NULL;
+}
+
+static int mask_pid(int gid) {
+    // pid 0 is illegal
+    int pid0 = find_free_pid(&gpbmap, gid);
+    // pid 1 need set
+    int pid1 = find_free_pid(&gpbmap, gid);
+
+    if (pid0 != 0 || pid1 != 1) {
+        release_gid(&gpbmap, gid);
+        return 3;
+    }
+    return 0;
+}
+
+static void get_fork_args(int clnt_sock) {
+    connect_list[clnt_sock].flag = 1;
+    while (1) {
+        if (connect_list[clnt_sock].rindex >= BUF_SIZE) {
+            printf("recv_callback() error, out of buffer.\n");
+        }
+        int str_len = read(clnt_sock, connect_list[clnt_sock].rbuffer+connect_list[clnt_sock].rindex, BUF_SIZE-connect_list[clnt_sock].rindex);
+        if (str_len == 0) {
+            epoll_ctl(epfd, EPOLL_CTL_DEL, clnt_sock, NULL);
+            close(clnt_sock);
+            // printf("close client: %d\n", clnt_sock);
+            return ;
+        } else if (str_len < 0) {
+            if (errno == EAGAIN) {
+                break;
+            }
+        } else {
+            connect_list[clnt_sock].rindex += str_len;
+        }
+    }
+    connect_list[clnt_sock].rbuffer[connect_list[clnt_sock].rindex] = '\0';
+
+    char* command;
+    char** args;
+    args = split_args(connect_list[clnt_sock].rbuffer, &command);
+    memset(connect_list[clnt_sock].rbuffer, 0, BUF_SIZE);
+    connect_list[clnt_sock].rindex = 0;
+
+    if (args == NULL) {
+        error_handling(4, clnt_sock, NULL);
+        return ;
+    }
+
+// #define CHECK_ARGS
+#ifdef CHECK_ARGS
+   check_args(command, args);
+#endif
+
+    int receive_gid = -1;
+    int receive_pid = -1;
+    int fork_group_parameter_index = -1;
+
+    int error_number = get_forkgroup_parameters(args, &receive_gid, &receive_pid, &fork_group_parameter_index);
+    if (error_number) {
+        error_handling(error_number, clnt_sock, NULL);
+        return ;
+    }
+
+    printf("receive_gid: %d, receive_pid: %d\n", receive_gid, receive_pid);
+
+    // 1. receive_gid = 0, receive_pid = 1
+    // 2. receive_gid = m, receive_pid = 1
+    // 3. receive_gid = m, receive_pid = n (n > 1)
+    
+    int gid = -1;
+    
+    if (receive_gid == 0) {
+        if (receive_pid != 1) {
+            error_handling(5, clnt_sock, NULL);
+            free_args(command, args);
+            // TODO free command and args
+            return ;
+        }
+        gid = find_free_gid(&gpbmap);
+        if (gid == -1) {
+            error_handling(6, clnt_sock, NULL);
+            free_args(command, args);
+            return ;
+        }
+
+        error_number = mask_pid(gid);
+        if (error_number) {
+            error_handling(error_number, clnt_sock, (void*)gid);
+            free_args(command, args);
+            return ;
+        }
+    } else {
+        gid = receive_gid;
+        if (!is_gid_set(&gpbmap, gid) || !is_pid_set(&gpbmap, gid, receive_pid)) {
+            error_handling(7, clnt_sock, NULL);
+            free_args(command, args);
+            return ;
+        }
+    }
+
+    int pid = find_free_pid(&gpbmap, gid);
+    if (pid == -1) {
+        error_handling(8, clnt_sock, (void*)gid);
+        return ;
+    }
+
+    // printf("new_gid: %d, new_pid: %d\n", gid, pid);
+
+    // 规定：返回信息中第一个参数为 gid，第二个参数为 pid
+    connect_list[clnt_sock].windex = sprintf(connect_list[clnt_sock].wbuffer, "%d %d", gid, pid);        
+    set_event(clnt_sock, EPOLLOUT|EPOLLET, 0);
+
+    char* temp = (char*)malloc(sizeof(char)*BUF_SIZE);
+    sprintf(temp, "gid=%d,pid=%d", gid, pid);
+    free(args[fork_group_parameter_index]);
+    args[fork_group_parameter_index] = (char*)malloc(sizeof(char)*(strlen(temp)+1));
+    strcpy(args[fork_group_parameter_index], temp);
+    free(temp);
+
+// #define CHECK_ARGS_CHILD
+#ifdef CHECK_ARGS_CHILD
+    printf("child progress check args\n");
+    check_args(command, args);
+#endif
+
+    // connect_list[clnt_sock].flag = 1;
+    connect_list[clnt_sock].command = command;
+    connect_list[clnt_sock].args = args;
 }
