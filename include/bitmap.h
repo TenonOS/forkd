@@ -3,8 +3,8 @@
 
 #include <stdint.h>
 
-#define GID_OFFSET 7
-#define PID_BYTE_NUMBER 4
+#define GID_OFFSET 2
+#define PID_BYTE_NUMBER 3
 #define BYTE_NUMBER(capacity) (capacity * PID_BYTE_NUMBER)
 
 typedef uint8_t uint_bm;

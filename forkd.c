@@ -11,6 +11,8 @@
 #include <fcntl.h>
 #include <errno.h>
 
+#include <sys/wait.h>
+
 #define ERROR_MESSAGE_SIZE 512
 #define PARAMETER_SIZE 128
 
@@ -22,11 +24,30 @@ static int epfd = 0;
 
 static connect_item connect_list[EPOLL_SIZE+3]; // 连接列表
 
+// SIGCHLD 信号处理程序
+void sigchld_handler(int signum) {
+    // 使用 WNOHANG 选项调用 waitpid，使其不阻塞
+    // while (waitpid(-1, NULL, WNOHANG) > 0);
+    printf("child process exit.\n");
+    waitpid(-1, NULL, 0);
+}
+
 int main(int argc, char *argv[]) {
     if (argc!= 2) {
         printf("Usage: %s <port>\n", argv[0]);
         exit(1);
     }
+
+    // struct sigaction sa;
+    // sa.sa_handler = sigchld_handler;
+    // sigemptyset(&sa.sa_mask);
+    // sa.sa_flags = 0; // 确保被中断的系统调用自动重启
+
+    // // 设置 SIGCHLD 信号处理程序
+    // if (sigaction(SIGCHLD, &sa, NULL) == -1) {
+    //     perror("sigaction");
+    //     exit(EXIT_FAILURE);
+    // }
 
     init_gpid_bitmap(&gpbmap);
 
@@ -38,8 +59,13 @@ int main(int argc, char *argv[]) {
     while (1) {
         int event_cnt = epoll_wait(epfd, ep_events, EPOLL_SIZE, -1);
         if (event_cnt == -1) {
+            // if (errno == EINTR) {
+            //     continue;
+            // } else {
+            //     printf("epoll_wait() error.\n");
+            //     break;
+            // }
             printf("epoll_wait() error.\n");
-            break;
         } else {
             // printf("event_cnt: %d\n", event_cnt);
         }
@@ -143,6 +169,7 @@ void recv_callback(int clnt_sock) {
         // printf("parent progress\n");
         // TODO free command and args
         free_args(connect_list[clnt_sock].command, connect_list[clnt_sock].args);
+        // waitpid(-1, NULL, 0);
     } else {
         // child progress
         // printf("child progress\n");
@@ -226,6 +253,15 @@ void set_event(int fd, int event, int flag) {
 
 #define ARG_NUMBER 128
 
+static int endsWith(const char*str, const char* suffix, const int suffixLen) {
+    int strLen = strlen(str);
+    if (suffixLen > strLen) {
+        return 0; 
+    }
+    const char* ptr = str + (strLen - suffixLen);
+    return strcmp(ptr, suffix) == 0;
+}
+
 char** split_args(char* args, char** command) {
     char* p = strtok(args, " ");
     if (p == NULL) {
@@ -247,9 +283,38 @@ char** split_args(char* args, char** command) {
             free_args(comm, result);
             return NULL;
         }
+
+        // TODO: -append 参数合并
+        // ugly：先处理 nginx 和 redis 应用参数均以 .conf 结尾的特征
+
         result[index] = (char *)malloc((strlen(p) + 1) * sizeof(char));
         strcpy(result[index], p);
         index++;
+
+        if (strcmp(p, "-append") == 0) {
+            char* append_parameter = (char*)malloc(sizeof(char)*(PARAMETER_SIZE+1));
+            memset(append_parameter, 0, PARAMETER_SIZE+1);
+            p = strtok(NULL, " ");
+            // TODO : error handle
+            while (p != NULL) {
+                if (!endsWith(p, ".conf", 5)) {
+                    strcat(append_parameter, p);
+                    strcat(append_parameter, " ");
+                    p = strtok(NULL, " ");
+                } else {
+                    strcat(append_parameter, p);
+                    break;
+                }
+            }
+
+            // printf("append_parameter : %s.\n", append_parameter);
+
+            result[index] = (char *)malloc((strlen(append_parameter) + 1) * sizeof(char));
+            strcpy(result[index], append_parameter);
+            index++;
+            free(append_parameter);
+
+        }
         p = strtok(NULL, " ");
     }
 
@@ -326,7 +391,7 @@ static int get_forkgroup_parameters(char** args, int* receive_gid, int* receive_
 
     *fork_group_parameter_index = index;
     free(forkgroup_parameter);
-    return NULL;
+    return 0;
 }
 
 static int mask_pid(int gid) {
@@ -430,6 +495,7 @@ static void get_fork_args(int clnt_sock) {
     int pid = find_free_pid(&gpbmap, gid);
     if (pid == -1) {
         error_handling(8, clnt_sock, (void*)gid);
+        free_args(command, args);
         return ;
     }
 

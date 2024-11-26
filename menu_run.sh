@@ -1,0 +1,13 @@
+sudo qemu-system-x86_64 \
+    -kernel "/home/dyz/imgs/redis_qemu-x86_64" \
+    -enable-kvm \
+    -nographic \
+    -m 256M \
+    -netdev bridge,id=en0,br=virbr0 -device virtio-net-pci,netdev=en0 \
+    -append "netdev.ip=172.44.0.2/24:172.44.0.1 -- /redis.conf" \
+    -fsdev local,id=myid,path="rootfs",security_model=none \
+    -device virtio-9p-pci,fsdev=myid,mount_tag=test,disable-modern=on,disable-legacy=off \
+    -cpu max \
+    -forkdaemon ipaddr="127.0.0.1",port=9190 \
+    -forked path="/home/dyz/imgs",filename="9827tempfile" \
+    -forkgroup gid=1,pid=2

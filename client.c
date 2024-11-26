@@ -28,9 +28,25 @@ int main(int argc, char *argv[]) {
     }
 
     /* Send request to forkd */
-    char request[512];
-    int len = sprintf(request, "qemu-system-x86_64 -kernel \"./build/app-test-fork_qemu-x86_64\" -cpu host -enable-kvm -nographic -m 1G -forkable path=\"/images/\" -forkgroup gid=%d,pid=%d", atoi(argv[1]), atoi(argv[2]));
 
+    char* request = "sudo qemu-system-x86_64 \
+            -kernel \"$kernel\" \
+            -enable-kvm \
+            -nographic \
+            -m 64M \
+            -netdev bridge,id=en0,br=virbr0 -device virtio-net-pci,netdev=en0 \
+            -append netdev.ip=172.44.0.2/24:172.44.0.1 -- -c /nginx/conf/nginx.conf \
+            -fsdev local,id=myid,path=\"$rootfs\",security_model=none \
+            -device virtio-9p-pci,fsdev=myid,mount_tag=test,disable-modern=on,disable-legacy=off \
+            -cpu max \
+            -forkdaemon ipaddr=\"127.0.0.1\",port=9190 \
+            -forkable path=\"/home/dyz/imgs\" \
+            -forkgroup gid=0,pid=1";
+
+    // char request[512];
+    // int len = sprintf(request, "qemu-system-x86_64 -kernel \"./build/app-test-fork_qemu-x86_64\" -cpu host -enable-kvm -nographic -m 1G -forkable path=\"/images/\" -forkgroup gid=%d,pid=%d", atoi(argv[1]), atoi(argv[2]));
+
+    int len = strlen(request);
     int windex = 0;
     while (windex < len) {
         windex += write(serv_sock, request + windex, len - windex);
