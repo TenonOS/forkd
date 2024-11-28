@@ -1,4 +1,4 @@
-#include "./include/bitmap.h"
+#include "../include/bitmap.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -214,4 +214,17 @@ int is_pid_set(gpid_bitmap* gpbmap, int gid, int pid) {
     int index = gid * PID_BYTE_NUMBER + GID_OFFSET + pid / bit_number;
     int offset = pid % bit_number;
     return is_bit_set(offset, gpbmap->bitmap[index]);
+}
+
+enum ERROR_NUMBER mask_pid(int gid, gpid_bitmap* gpbmap) {
+    // pid 0 is illegal
+    int pid0 = find_free_pid(gpbmap, gid);
+    // pid 1 need set
+    int pid1 = find_free_pid(gpbmap, gid);
+
+    if (pid0 != 0 || pid1 != 1) {
+        release_gid(gpbmap, gid);
+        return ERROR_NUMBER_BITMAP_DIRTY;
+    }
+    return NUMBER_SUCCESS;
 }

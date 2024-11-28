@@ -1,4 +1,4 @@
-#include "./include/list.h"
+#include "../include/list.h"
 
 void list_init(list_h_t *list)
 {
