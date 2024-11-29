@@ -12,7 +12,7 @@
 #define PARAMETER_SIZE 128
 #define ARG_NUMBER 128
 #define BUF_SIZE 1024
-#define CHECK_ARGS 1
+#define CHECK_ARGS 0
 #define CHECK_ARGS_CHILD 0
 
 extern int epfd;
