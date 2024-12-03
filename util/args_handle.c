@@ -21,6 +21,8 @@ extern connect_item connect_list[];
 
 static inline int check_number(char* str);
 static int endsWith(const char*str, const char* suffix, const int suffixLen);
+static enum ERROR_NUMBER get_forkgroup_parameters(char** args, int* receive_gid, int* receive_pid, int* fork_group_parameter_index);
+static char** split_args(char* args, char** command);
 
 void check_args(char* command, char** args) {
     printf("check args\n");
@@ -48,7 +50,100 @@ void free_args(char* command, char** args) {
     free(args);
 }
 
-char** split_args(char* args, char** command) {
+void get_fork_args(int clnt_sock) {
+    char* receive_args = connect_list[clnt_sock].recv_package->data;
+
+    char* command;
+    char** args;
+    args = split_args(receive_args, &command);
+    if (args == NULL) {
+        error_handling(ERROR_NUMBER_FORKARGS_NULL, clnt_sock, NULL);
+        return ;
+    }
+
+#if CHECK_ARGS
+   check_args(command, args);
+#endif
+
+    int receive_gid = -1;
+    int receive_pid = -1;
+    int fork_group_parameter_index = -1;
+
+    enum ERROR_NUMBER error_number = get_forkgroup_parameters(args, &receive_gid, &receive_pid, &fork_group_parameter_index);
+    if (error_number) {
+        error_handling(error_number, clnt_sock, NULL);
+        return ;
+    }
+
+    // printf("receive_gid: %d, receive_pid: %d\n", receive_gid, receive_pid);
+
+    // 1. receive_gid = 0, receive_pid = 1
+    // 2. receive_gid = m, receive_pid = 1
+    // 3. receive_gid = m, receive_pid = n (n > 1)
+
+    // receive_gid must be legal
+    if (receive_gid == 0) {
+        printf("error : receive_gid = 0\n");
+        exit(1);
+    }
+
+    int gid = receive_gid;
+    if (!is_gid_set(&gpbmap, gid) || !is_pid_set(&gpbmap, gid, receive_pid)) {
+        error_handling(ERROR_NUMBER_ILLEGAL_GIDPID, clnt_sock, NULL);
+        free_args(command, args);
+        return ;
+    }
+
+    int pid = find_free_pid(&gpbmap, gid);
+    if (pid == -1) {
+        error_handling(ERROR_NUMBER_NOFREEPID, clnt_sock, (void*)gid);
+        free_args(command, args);
+        return ;
+    }
+
+    connect_list[clnt_sock].next_child_pid = pid;
+
+    // 仅返回子进程的 pid
+    // 构造 send_package
+    package* pack = connect_list[clnt_sock].send_package;
+    pack->command = CMD_SENDGIDPID;
+    char* temp = (char*)malloc(sizeof(char)*BUF_SIZE);
+    pack->len = sprintf(temp, "%d", pid);
+    pack->data = (char*)malloc(pack->len);
+    memcpy(pack->data, temp, pack->len);
+
+    sprintf(temp, "gid=%d,pid=%d", gid, pid);
+    free(args[fork_group_parameter_index]);
+    args[fork_group_parameter_index] = (char*)malloc(sizeof(char)*(strlen(temp)+1));
+    strcpy(args[fork_group_parameter_index], temp);
+    free(temp);
+
+#if CHECK_ARGS_CHILD
+    printf("child progress check args\n");
+    check_args(command, args);
+#endif
+
+    connect_list[clnt_sock].command = command;
+    connect_list[clnt_sock].args = args;
+}
+
+static inline int check_number(char* str) {
+    if (str == NULL) {
+        return 0;
+    }
+    return (str[0] >= '0' && str[0] <= '9') ? 1 : 0;
+}
+
+static int endsWith(const char*str, const char* suffix, const int suffixLen) {
+    int strLen = strlen(str);
+    if (suffixLen > strLen) {
+        return 0; 
+    }
+    const char* ptr = str + (strLen - suffixLen);
+    return strcmp(ptr, suffix) == 0;
+}
+
+static char** split_args(char* args, char** command) {
     char* p = strtok(args, " ");
     if (p == NULL) {
         printf("split_args() error.\n");
@@ -111,7 +206,7 @@ char** split_args(char* args, char** command) {
     return result;
 }
 
-enum ERROR_NUMBER get_forkgroup_parameters(char** args, int* receive_gid, int* receive_pid, int* fork_group_parameter_index) {
+static enum ERROR_NUMBER get_forkgroup_parameters(char** args, int* receive_gid, int* receive_pid, int* fork_group_parameter_index) {
     int index = 0;
     char* forkgroup_parameter = NULL;
     while (args[index] != NULL) {
@@ -147,133 +242,5 @@ enum ERROR_NUMBER get_forkgroup_parameters(char** args, int* receive_gid, int* r
     *fork_group_parameter_index = index;
     free(forkgroup_parameter);
     return NUMBER_SUCCESS;
-}
-
-void get_fork_args(int clnt_sock) {
-    connect_list[clnt_sock].flag = 1;
-    while (1) {
-        if (connect_list[clnt_sock].rindex >= BUF_SIZE) {
-            printf("recv_callback() error, out of buffer.\n");
-        }
-        int str_len = read(clnt_sock, connect_list[clnt_sock].rbuffer+connect_list[clnt_sock].rindex, BUF_SIZE-connect_list[clnt_sock].rindex);
-        if (str_len == 0) {
-            epoll_ctl(epfd, EPOLL_CTL_DEL, clnt_sock, NULL);
-            close(clnt_sock);
-            // printf("close client: %d\n", clnt_sock);
-            return ;
-        } else if (str_len < 0) {
-            if (errno == EAGAIN) {
-                break;
-            }
-        } else {
-            connect_list[clnt_sock].rindex += str_len;
-        }
-    }
-    connect_list[clnt_sock].rbuffer[connect_list[clnt_sock].rindex] = '\0';
-
-    char* command;
-    char** args;
-    args = split_args(connect_list[clnt_sock].rbuffer, &command);
-    memset(connect_list[clnt_sock].rbuffer, 0, BUF_SIZE);
-    connect_list[clnt_sock].rindex = 0;
-
-    if (args == NULL) {
-        error_handling(ERROR_NUMBER_FORKARGS_NULL, clnt_sock, NULL);
-        return ;
-    }
-
-#if CHECK_ARGS
-   check_args(command, args);
-#endif
-
-    int receive_gid = -1;
-    int receive_pid = -1;
-    int fork_group_parameter_index = -1;
-
-    enum ERROR_NUMBER error_number = get_forkgroup_parameters(args, &receive_gid, &receive_pid, &fork_group_parameter_index);
-    if (error_number) {
-        error_handling(error_number, clnt_sock, NULL);
-        return ;
-    }
-
-    // printf("receive_gid: %d, receive_pid: %d\n", receive_gid, receive_pid);
-
-    // 1. receive_gid = 0, receive_pid = 1
-    // 2. receive_gid = m, receive_pid = 1
-    // 3. receive_gid = m, receive_pid = n (n > 1)
-    
-    int gid = -1;
-    
-    if (receive_gid == 0) {
-        if (receive_pid != 1) {
-            error_handling(ERROR_NUMBER_IVALID_ARGS, clnt_sock, NULL);
-            free_args(command, args);
-            return ;
-        }
-        gid = find_free_gid(&gpbmap);
-        if (gid == -1) {
-            error_handling(ERROR_NUMBER_NOFREEGID, clnt_sock, NULL);
-            free_args(command, args);
-            return ;
-        }
-
-        error_number = mask_pid(gid, &gpbmap);
-        if (error_number) {
-            error_handling(error_number, clnt_sock, (void*)gid);
-            free_args(command, args);
-            return ;
-        }
-    } else {
-        gid = receive_gid;
-        if (!is_gid_set(&gpbmap, gid) || !is_pid_set(&gpbmap, gid, receive_pid)) {
-            error_handling(ERROR_NUMBER_ILLEGAL_GIDPID, clnt_sock, NULL);
-            free_args(command, args);
-            return ;
-        }
-    }
-
-    int pid = find_free_pid(&gpbmap, gid);
-    if (pid == -1) {
-        error_handling(ERROR_NUMBER_NOFREEPID, clnt_sock, (void*)gid);
-        free_args(command, args);
-        return ;
-    }
-
-    // printf("new_gid: %d, new_pid: %d\n", gid, pid);
-
-    // 规定：返回信息中第一个参数为 gid，第二个参数为 pid
-    connect_list[clnt_sock].windex = sprintf(connect_list[clnt_sock].wbuffer, "%d %d", gid, pid);        
-    set_event(clnt_sock, EPOLLOUT|EPOLLET, 0);
-
-    char* temp = (char*)malloc(sizeof(char)*BUF_SIZE);
-    sprintf(temp, "gid=%d,pid=%d", gid, pid);
-    free(args[fork_group_parameter_index]);
-    args[fork_group_parameter_index] = (char*)malloc(sizeof(char)*(strlen(temp)+1));
-    strcpy(args[fork_group_parameter_index], temp);
-    free(temp);
-
-#if CHECK_ARGS_CHILD
-    printf("child progress check args\n");
-    check_args(command, args);
-#endif
-
-    connect_list[clnt_sock].command = command;
-    connect_list[clnt_sock].args = args;
-}
-
-static inline int check_number(char* str) {
-    if (str == NULL) {
-        return 0;
-    }
-    return (str[0] >= '0' && str[0] <= '9') ? 1 : 0;
-}
-
-static int endsWith(const char*str, const char* suffix, const int suffixLen) {
-    int strLen = strlen(str);
-    if (suffixLen > strLen) {
-        return 0; 
-    }
-    const char* ptr = str + (strLen - suffixLen);
-    return strcmp(ptr, suffix) == 0;
 }
 

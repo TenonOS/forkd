@@ -1,6 +1,6 @@
 cd ./build
 
-./client 0 1
+./client_main
 
 # for i in {1..10}; do
 #     ./client 0 1

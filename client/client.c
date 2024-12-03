@@ -5,12 +5,102 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 
+#define BUF_SIZE 256
+
+enum CMD {
+    CMD_ERROR = 0,
+    CMD_INIT,
+    CMD_INITRET,
+    CMD_FORKPARA,
+    CMD_QEMUFORK,
+    CMD_CLIENTCOLSE,
+    CMD_WAITPID,
+    CMD_WAITPIDRET,
+    CMD_SENDGIDPID,
+    CMD_KILL,
+};
+
+typedef struct {
+    enum CMD command;
+    int len;
+    char *data;
+} package;
+
+void check_package(package *p) {
+    printf("-----------------------------------------\n");
+    printf("check package:\n");
+    printf("%d %d ", p->command, p->len);
+    fflush(stdout);
+    write(fileno(stdout), p->data, p->len);
+    printf("\n-----------------------------------------\n");
+}
+
+static void check_str(char* str, int len) {
+    for (int i = 0; i < len; i++) {
+        // putchar(str[i]+48);
+        printf("%d ", str[i]);
+    }
+    putchar('\n');
+}
+
+static void readlen(int serv_sock, char* buffer, int len) {
+    int str_len = 0;
+    while (str_len < len) {
+        int read_len = read(serv_sock, buffer+str_len, len-str_len);
+        str_len += read_len;
+    }
+    return ;
+}
+
+static void receive_package(int serv_sock, package* pack) {
+    // package* pack = (package*)malloc(sizeof(package));
+    int cmd_len = sizeof(pack->command);
+    // 读取 CMD
+    readlen(serv_sock, (char*)&pack->command, cmd_len);
+    // 读取 DATA_LEN
+    int args_len = sizeof(pack->len);
+    readlen(serv_sock, (char*)&pack->len, args_len);
+    // 读取 DATA
+    if (pack->len > 0) {
+        pack->data = (char*)malloc(pack->len);
+        readlen(serv_sock, pack->data, pack->len);
+    }
+    return ;
+}
+
+static char* serialize_package(package *p, int* str_len) {
+    *str_len = sizeof(p->command) + sizeof(p->len) + p->len;
+    char* buf = (char*)malloc(*str_len);
+    int offset = 0;
+    memcpy(buf, &p->command, sizeof(p->command));
+    offset += sizeof(p->command);
+    memcpy(buf + offset, &p->len, sizeof(p->len));
+    if (p->len > 0) {
+        offset += sizeof(p->len);
+        memcpy(buf + offset, p->data, p->len);
+    }
+    // check_str(buf, str_len);
+    return buf;
+}
+
+static void send_package(package* p, int serv_sock) {
+    int str_len;
+    char* message = serialize_package(p, &str_len);
+    // check_str(message, strlen(message));
+    // int len = strlen(message);
+    int windex = 0;
+    while (windex < str_len) {
+        windex += write(serv_sock, message + windex, str_len - windex);
+    }
+    free(message);
+    if (p->data!= NULL)
+        free(p->data);
+    // free(p);
+}
 
 int main(int argc, char *argv[]) {
-    if (argc!= 3) {
-        printf("Usage:./client <gid> <pid>\n");
-        exit(1);
-    }
+    // qemu init
+
     uint16_t serv_port = 9190;
     const char* serv_ip = "127.0.0.1";
     int serv_sock = socket(AF_INET, SOCK_STREAM, 0);
@@ -27,7 +117,40 @@ int main(int argc, char *argv[]) {
         printf("Connect success\n");
     }
 
-    /* Send request to forkd */
+    int gid = 0;
+    int pid = 1;
+
+    package* send_pack = (package*)malloc(sizeof(package));
+    send_pack->command = CMD_INIT;
+    char* temp = (char*)malloc(sizeof(char)*BUF_SIZE);
+    // 换成自己的gid和pid
+    send_pack->len = sprintf(temp, "%d %d", gid, pid);
+    send_pack->data = (char*)malloc(send_pack->len);
+    memcpy(send_pack->data, temp, send_pack->len);
+    // printf("send_pack->len: %d\n", send_pack->len);
+    free(temp);
+
+    send_package(send_pack, serv_sock);
+    free(send_pack);
+
+    // 如果自己的 gid 是 0，那么就接收新分配的 gid 并设置
+    // 否则不需要额外处理
+    if (gid == 0) {
+        package* receive_pack = (package*)malloc(sizeof(package));
+        receive_package(serv_sock, receive_pack);
+        if (receive_pack->command == CMD_INITRET) {
+            char* receive = receive_pack->data;
+            char* p = strtok(receive, " ");
+            int new_gid = atoi(p);
+            // handle
+            gid = new_gid;
+        } else {
+            // error handling
+        }
+    }
+    
+
+    // qemu fork
 
     char* request = "sudo qemu-system-x86_64 \
             -kernel \"$kernel\" \
@@ -41,51 +164,75 @@ int main(int argc, char *argv[]) {
             -cpu max \
             -forkdaemon ipaddr=\"127.0.0.1\",port=9190 \
             -forkable path=\"/home/dyz/imgs\" \
-            -forkgroup gid=0,pid=1";
+            -forkgroup gid=1,pid=1";
 
-    // char request[512];
-    // int len = sprintf(request, "qemu-system-x86_64 -kernel \"./build/app-test-fork_qemu-x86_64\" -cpu host -enable-kvm -nographic -m 1G -forkable path=\"/images/\" -forkgroup gid=%d,pid=%d", atoi(argv[1]), atoi(argv[2]));
+    send_pack = (package*)malloc(sizeof(package));
+    send_pack->command = CMD_FORKPARA;
+    send_pack->len = strlen(request);
+    send_pack->data = (char*)malloc(send_pack->len);
+    memcpy(send_pack->data, request, send_pack->len);
+    send_package(send_pack, serv_sock);
 
-    int len = strlen(request);
-    int windex = 0;
-    while (windex < len) {
-        windex += write(serv_sock, request + windex, len - windex);
-    }
-    
-    int buffer_size = 1024;
-    char receive[buffer_size];
-    int rindex = 0;
-    memset(receive, 0, buffer_size);
+    // gid 在 init 阶段已经保证合理，因此此处进返回子进程的 pid
+    package* receive_pack = (package*)malloc(sizeof(package));
+    receive_package(serv_sock, receive_pack);
+    char* receive = receive_pack->data;
+    char* p = strtok(receive, " ");
+    int cpid = atoi(p);
+    free(receive);
+    free(receive_pack);
+    // 此处处理子进程的 pid
 
-    while (1) {
-        int str_len = read(serv_sock, receive+rindex, buffer_size - rindex);
-        if (str_len == 0) {
-            printf("Receive finished\n");
-            // close(serv_sock);
-            break;
-        } else {
-            rindex += str_len;
-            if (rindex >= buffer_size) {
-                printf("Receive buffer is full\n");
-                break;
-            }
-        }
-    }
+    // after qem_fork finished
 
-    if (receive[0] >= '0' && receive[0] <= '9') {
-        char* p = strtok(receive, " ");
-        int gid = atoi(p);
-        int pid = atoi(strtok(NULL, " "));
-        printf("gid : %d, pid : %d.\n", gid, pid);
-    } else {
-        // print error 
-    }
+    send_pack->command = CMD_QEMUFORK;
+    send_pack->len = 0;
+    send_pack->data = NULL;
+    send_package(send_pack, serv_sock);
+    free(send_pack);
 
-    // after qum_fork
+    // qemu close
+
+    send_pack = (package*)malloc(sizeof(package));
+    send_pack->command = CMD_CLIENTCOLSE;
+    send_pack->len = 0;
+    send_pack->data = NULL;
+    send_package(send_pack, serv_sock);
     close(serv_sock);
+    free(send_pack);
 
-    // write(fileno(stdout), receive, rindex);
-    // putchar('\n');
+    // qemu waitpid
 
-    // getchar();
+    send_pack = (package*)malloc(sizeof(package));
+    send_pack->command = CMD_WAITPID;
+    temp = (char*)malloc(sizeof(char)*BUF_SIZE);
+    // 换成要等待的子进程的gid pid
+    send_pack->len = sprintf(temp, "%d %d", gid, pid);
+    send_pack->data = (char*)malloc(send_pack->len);
+    memcpy(send_pack->data, temp, send_pack->len);
+    free(temp);
+    send_package(send_pack, serv_sock);
+    free(send_pack);
+
+
+    receive_pack = (package*)malloc(sizeof(package));
+    // 该函数返回，说明相应进程已经结束，waitpid 直接返回等待的 pid 就行了
+    receive_package(serv_sock, receive_pack);
+    free(receive_pack);
+
+
+    // qemu kill
+
+    /*
+    send_pack = (package*)malloc(sizeof(package));
+    send_pack->command = CMD_KILL;
+    temp = (char*)malloc(sizeof(char)*BUF_SIZE);
+    // 换成要杀死进程的 gid pid
+    send_pack->len = sprintf(temp, "%d %d", gid, pid);
+    send_pack->data = (char*)malloc(send_pack->len);
+    memcpy(send_pack->data, temp, send_pack->len);
+    free(temp);
+    send_package(send_pack, serv_sock);
+    free(send_pack);
+    */
 };

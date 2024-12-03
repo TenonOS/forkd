@@ -7,15 +7,20 @@ project(server_client)
 include_directories(./ ./include)
 # Add block directories
 add_subdirectory(util)
+add_subdirectory(package)
 add_subdirectory(server)
 # add_dependencies(server util)
 add_subdirectory(client)
-# add_subdirectory(world)
 # Target
 add_executable(server_main ./main.c)
 # server 依赖于 util，注意库的链接顺序
-target_link_libraries(server_main server util)
+target_link_libraries(server_main server package util)
+
 add_executable(client_main ./client/client.c)
 target_link_libraries(client_main util client)
-add_executable(test_bitmap ./test_bitmap.c)
-target_link_libraries(test_bitmap util)
+
+# add_executable(test_bitmap ./test/test_bitmap.c)
+# target_link_libraries(test_bitmap util)
+
+# add_executable(test_package ./test/test_package.c)
+# target_link_libraries(test_package package)
