@@ -15,6 +15,8 @@
 #include <errno.h>
 
 int gpid[128][128] = {0};
+int waitpid_sock[128][128] = {0};
+int globalpid_flag[128][128] = {0};
 
 gpid_bitmap gpbmap;
 int epfd = 0;
@@ -119,10 +121,11 @@ void recv_callback(int clnt_sock) {
             break;
         case CMD_QEMUFORK:
             do_fork(clnt_sock);
+            set_event(clnt_sock, EPOLLOUT|EPOLLET, 0);
             break;
         case CMD_CLIENTCOLSE:
             handle_client_close(clnt_sock);
-            break;
+            return ;
         case CMD_WAITPID:
             handle_waitpid(clnt_sock);
             break;
@@ -258,7 +261,13 @@ static void handle_init(int clnt_sock) {
     connect_list[clnt_sock].gid = gid;
     connect_list[clnt_sock].pid = pid;
     connect_list[clnt_sock].global_pid = gpid[gid][pid];
+    globalpid_flag[gid][pid] = 0;
     gpid[gid][pid] = clnt_sock; 
+    connect_list[clnt_sock].statu = RUN;
+    if (waitpid_sock[gid][pid]) {
+        connect_list[clnt_sock].wait_list[connect_list[clnt_sock].wait_count++] = waitpid_sock[gid][pid];
+        waitpid_sock[gid][pid] = 0;
+    }
 }
 
 static void do_fork(int clnt_sock) {
@@ -271,6 +280,13 @@ static void do_fork(int clnt_sock) {
     if (tmp_pid != 0) {
         free_args(connect_list[clnt_sock].command, connect_list[clnt_sock].args);
         gpid[connect_list[clnt_sock].gid][connect_list[clnt_sock].next_child_pid] = tmp_pid;
+        globalpid_flag[connect_list[clnt_sock].gid][connect_list[clnt_sock].next_child_pid] = 1;
+        connect_list[clnt_sock].next_child_pid = 0;
+
+        package* pack = connect_list[clnt_sock].send_package;
+        pack->command = CMD_QEMUFORKRET;
+        pack->len = 0;
+        pack->data = NULL;
         // waitpid(-1, NULL, 0);
     } else {
         // check_args(connect_list[clnt_sock].command, connect_list[clnt_sock].args);        
@@ -283,7 +299,6 @@ static void handle_client_close(int clnt_sock) {
     // 删除事件
     epoll_ctl(epfd, EPOLL_CTL_DEL, clnt_sock, NULL);
     int count  = connect_list[clnt_sock].wait_count;
-    int* wait_list = connect_list[clnt_sock].wait_list;
     if (count > 0) {
         int* wait_list = connect_list[clnt_sock].wait_list;
         for (int i = 0; i < count; i++) {
@@ -310,12 +325,21 @@ static void handle_waitpid(int clnt_sock) {
     p = strtok(NULL, " ");
     int pid = atoi(p);
 
+    // unregister
+    int flag = globalpid_flag[gid][pid];
+    if (flag) {
+        waitpid_sock[gid][pid] = clnt_sock;
+        return ;
+    }
+
     int sock = gpid[gid][pid];
+    
     if (sock == 0) {
         // TODO : error handle
         printf("error: pid not found.\n");
     }
 
+    // zombie
     if (connect_list[sock].statu == ZOMBIE) {
         package* pack = connect_list[clnt_sock].send_package;
         pack->command = CMD_WAITPIDRET;
@@ -326,6 +350,7 @@ static void handle_waitpid(int clnt_sock) {
         close(sock);
         set_event(clnt_sock, EPOLLOUT|EPOLLET, 0);
     } else {
+        // run
         connect_list[sock].wait_list[connect_list[sock].wait_count++] = clnt_sock;
     }
 }
@@ -375,9 +400,16 @@ static void clear_connect_item(int clnt_sock) {
     connect_list[clnt_sock].pid = -1;
     connect_list[clnt_sock].global_pid = -1;
     connect_list[clnt_sock].wait_count = 0;
+    connect_list[clnt_sock].statu = -1;
     memset(connect_list[clnt_sock].wait_list, 0, sizeof(int) * WAIT_LIST_LEN);
     connect_list[clnt_sock].s_recv_callback = NULL;
     connect_list[clnt_sock].s_send_callback = NULL;
+    if (connect_list[clnt_sock].recv_package->data != NULL) {
+        free(connect_list[clnt_sock].recv_package->data);
+    }
+    if (connect_list[clnt_sock].send_package->data!= NULL) {
+        free(connect_list[clnt_sock].send_package->data);
+    }
     free(connect_list[clnt_sock].recv_package);
     free(connect_list[clnt_sock].send_package);
     connect_list[clnt_sock].recv_package = NULL;

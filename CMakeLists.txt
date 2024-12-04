@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 2.8)
 project(server_client)
+
+set(CMAKE_BUILD_TYPE debug CACHE STRING "Build Type" FORCE)
  
 # Add the source in project root directory
 # aux_source_directory(. DIRSRCS)
