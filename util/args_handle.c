@@ -15,6 +15,9 @@
 #define CHECK_ARGS 0
 #define CHECK_ARGS_CHILD 0
 
+#define REPLACED_MAC_INFO "virtio-net-pci,netdev=en0,mac=52:54:00:42:32:46"
+#define REPLACED_IPADDR_INFO "netdev.ip=172.46.0.3/24:172.46.0.1 -- -c /nginx/conf/nginx.conf"
+
 extern int epfd;
 extern gpid_bitmap gpbmap;
 extern connect_item connect_list[];
@@ -31,6 +34,21 @@ void check_args(char* command, char** args) {
         ++i;
     }
     printf("check args end\n");
+}
+
+void check_args_mac(char* command, char** args) {
+    int i = 0;
+    while (args[i] != NULL) {
+        if (strncmp(args[i], "virtio-net-pci", strlen("virtio-net-pci")) == 0) {
+            args[i] = (char*)malloc(sizeof(REPLACED_MAC_INFO));
+            memcpy(args[i], REPLACED_MAC_INFO, sizeof(REPLACED_MAC_INFO));
+        }
+        if (strncmp(args[i], "netdev.ip", strlen("netdev.ip")) == 0) {
+            args[i] = (char*)malloc(sizeof(REPLACED_IPADDR_INFO));
+            memcpy(args[i], REPLACED_IPADDR_INFO, sizeof(REPLACED_IPADDR_INFO));
+        }
+        ++i;
+    }
 }
 
 void free_args(char* command, char** args) {
@@ -181,6 +199,8 @@ void get_fork_args(int clnt_sock) {
         error_handling(ERROR_NUMBER_FORKARGS_NULL, clnt_sock, NULL);
         return ;
     }
+
+//    check_args_mac(command, args);
 
 #if CHECK_ARGS
    check_args(command, args);
